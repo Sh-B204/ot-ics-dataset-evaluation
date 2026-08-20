@@ -65,12 +65,6 @@ python -m ics_ids.visualization.visualization
 
 The repeated-seed, time-ablation, and unsupervised experiment scripts support `--plot-only` for regenerating figures from saved outputs without retraining.
 
-To regenerate the final evaluation batch:
-
-```bash
-python scripts/run_all.py --plot-only
-```
-
 ## Final outputs
 
 The retained results are organized under:
