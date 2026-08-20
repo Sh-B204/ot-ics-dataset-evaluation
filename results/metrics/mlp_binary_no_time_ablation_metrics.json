@@ -1,0 +1,43 @@
+{
+  "accuracy": 0.9713323767988294,
+  "precision": 0.9184692179700499,
+  "recall": 0.5478908188585608,
+  "f1_score": 0.6863537457258315,
+  "false_positive_rate": 0.0029534529783162306,
+  "confusion_matrix": [
+    [
+      66167,
+      196
+    ],
+    [
+      1822,
+      2208
+    ]
+  ],
+  "confusion_matrix_labels": [
+    "Normal (0)",
+    "Attack (1)"
+  ],
+  "roc_auc": 0.8835969671880228,
+  "model": "mlp",
+  "task": "binary",
+  "benchmark": "no_time",
+  "n_features": 41,
+  "training_time_seconds": 70.22519898414612,
+  "epochs_trained": 11,
+  "params": {
+    "layers_units": [
+      128,
+      64,
+      32
+    ],
+    "activation": "relu",
+    "dropout_rates": [
+      0.3,
+      0.2,
+      0.0
+    ],
+    "learning_rate": 0.001,
+    "batch_size": 256
+  }
+}

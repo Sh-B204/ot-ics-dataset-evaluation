@@ -1,0 +1,98 @@
+{
+  "random_forest_binary": {
+    "model": "random_forest",
+    "task": "binary",
+    "benchmark": "time_ablated",
+    "objective_metric": "f1_score",
+    "objective_score": 0.528347085440511,
+    "params": {
+      "n_estimators": "300",
+      "min_samples_split": "10",
+      "min_samples_leaf": "4",
+      "max_features": "log2",
+      "max_depth": null,
+      "bootstrap": "True"
+    }
+  },
+  "random_forest_multiclass": {
+    "model": "random_forest",
+    "task": "multiclass",
+    "benchmark": "time_ablated",
+    "objective_metric": "macro_f1",
+    "objective_score": 0.5497121422922565,
+    "params": {
+      "n_estimators": "500",
+      "min_samples_split": "5",
+      "min_samples_leaf": "2",
+      "max_features": null,
+      "max_depth": null,
+      "bootstrap": "True"
+    }
+  },
+  "xgboost_binary": {
+    "model": "xgboost",
+    "task": "binary",
+    "benchmark": "time_ablated",
+    "objective_metric": "f1_score",
+    "objective_score": 0.4606681609563454,
+    "params": {
+      "subsample": 1.0,
+      "reg_lambda": "2",
+      "n_estimators": "600",
+      "min_child_weight": "1",
+      "max_depth": "4",
+      "learning_rate": 0.01,
+      "gamma": 0.5,
+      "colsample_bytree": 1.0
+    }
+  },
+  "xgboost_multiclass": {
+    "model": "xgboost",
+    "task": "multiclass",
+    "benchmark": "time_ablated",
+    "objective_metric": "macro_f1",
+    "objective_score": 0.5504866769621416,
+    "params": {
+      "subsample": 0.7,
+      "reg_lambda": "2",
+      "n_estimators": "600",
+      "min_child_weight": "1",
+      "max_depth": "6",
+      "learning_rate": 0.2,
+      "gamma": 0.0,
+      "colsample_bytree": 0.7
+    }
+  },
+  "mlp_binary": {
+    "model": "mlp",
+    "task": "binary",
+    "benchmark": "time_ablated",
+    "objective_metric": "f1_score",
+    "objective_score": 0.5097990263387842,
+    "params": {
+      "validation_fraction": 0.1,
+      "learning_rate_init": 0.003,
+      "hidden_layer_sizes": "(128, 64)",
+      "early_stopping": "True",
+      "batch_size": "128",
+      "alpha": 0.001,
+      "activation": "tanh"
+    }
+  },
+  "mlp_multiclass": {
+    "model": "mlp",
+    "task": "multiclass",
+    "benchmark": "time_ablated",
+    "objective_metric": "macro_f1",
+    "objective_score": 0.447320804342427,
+    "params": {
+      "validation_fraction": 0.1,
+      "learning_rate_init": 0.0005,
+      "hidden_layer_sizes": "(64, 32)",
+      "early_stopping": "True",
+      "batch_size": "128",
+      "alpha": 0.005,
+      "activation": "tanh"
+    }
+  }
+}

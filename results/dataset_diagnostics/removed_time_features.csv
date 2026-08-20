@@ -1,0 +1,9 @@
+removed_feature,is_expected_time_or_position_feature
+startOffset,True
+endOffset,True
+raw_start_time,True
+raw_end_time,True
+event_time_seconds,True
+event_end_seconds,True
+start_seconds_of_day,True
+end_seconds_of_day,True
