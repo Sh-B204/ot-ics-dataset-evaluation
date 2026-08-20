@@ -1,5 +1,4 @@
 import argparse
-import itertools
 import json
 import time
 from pathlib import Path
@@ -80,9 +79,9 @@ def sampled_configs(space, n_iter, seed):
 
 def load_task_data(task):
     if task == "binary":
-        X_train, y_train, _, _, features = utils.load_binary_datasets(config.NO_TIME_DATA_DIR)
+        X_train, y_train, _, _, features = utils.load_binary_datasets(config.TIME_ABLATED_DATA_DIR)
     else:
-        X_train, y_train, _, _, features = utils.load_multiclass_datasets(config.NO_TIME_DATA_DIR)
+        X_train, y_train, _, _, features = utils.load_multiclass_datasets(config.TIME_ABLATED_DATA_DIR)
     return X_train, y_train, features
 
 
@@ -559,7 +558,7 @@ def main():
     tasks = normalize_requested(args.tasks, TASKS)
 
     print("Hyperparameter study on time-ablated benchmark")
-    print("Data:", Path(config.NO_TIME_DATA_DIR).resolve())
+    print("Data:", Path(config.TIME_ABLATED_DATA_DIR).resolve())
     print("Output:", OUT_DIR.resolve())
     print("Models:", models)
     print("Tasks:", tasks)

@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
-
 import pandas as pd
-
 from .. import config
 
 
@@ -140,41 +138,41 @@ def count_binary_distribution(data_dir, out_dir):
     return table, ratio_df
 
 
-def feature_count_summary(with_time_dir, no_time_dir, out_dir):
-    with_feature_path = with_time_dir / "binary_detection_feature_list.json"
-    no_time_feature_path = no_time_dir / "binary_detection_feature_list.json"
+def feature_count_summary(full_features_dir, time_ablated_dir, out_dir):
+    full_features_path = full_features_dir / "binary_detection_feature_list.json"
+    time_ablated_feature_path = time_ablated_dir / "binary_detection_feature_list.json"
 
-    if not with_feature_path.exists() or not no_time_feature_path.exists():
+    if not full_features_path.exists() or not time_ablated_feature_path.exists():
         print("[skip] missing feature list json files")
         return None
 
-    with_features = json.loads(with_feature_path.read_text())
-    no_time_features = json.loads(no_time_feature_path.read_text())
+    full_features = json.loads(full_features_path.read_text())
+    time_ablated_features = json.loads(time_ablated_feature_path.read_text())
 
-    removed = [c for c in with_features if c not in no_time_features]
-    expected_removed = [c for c in TIME_LEAKAGE_COLS if c in with_features]
+    removed = [c for c in full_features if c not in time_ablated_features]
+    expected_removed = [c for c in TIME_LEAKAGE_COLS if c in full_features]
 
     summary = pd.DataFrame([
-        {"benchmark_version": "with_time", "feature_count": len(with_features), "removed_feature_count": 0, "removed_features": ""},
-        {"benchmark_version": "no_time", "feature_count": len(no_time_features), "removed_feature_count": len(removed), "removed_features": "; ".join(removed)},
+        {"benchmark_version": "full_features", "feature_count": len(full_features), "removed_feature_count": 0, "removed_features": ""},
+        {"benchmark_version": "time_ablated", "feature_count": len(time_ablated_features), "removed_feature_count": len(removed), "removed_features": "; ".join(removed)},
     ])
-    summary.to_csv(out_dir / "feature_count_original_vs_no_time.csv", index=False)
+    summary.to_csv(out_dir / "feature_count_full_vs_time_ablated.csv", index=False)
 
     removed_df = pd.DataFrame({"removed_feature": removed})
     removed_df["is_expected_time_or_position_feature"] = removed_df["removed_feature"].isin(TIME_LEAKAGE_COLS)
     removed_df.to_csv(out_dir / "removed_time_features.csv", index=False)
 
-    print("[saved] feature_count_original_vs_no_time.csv")
+    print("[saved] feature_count_full_vs_time_ablated.csv")
     print("[saved] removed_time_features.csv")
-    print(f"Original model-input features: {len(with_features)}")
+    print(f"Full_features model-input features: {len(full_features)}")
     print(f"Removed time/capture-position features: {len(removed)}")
-    print(f"No-time model-input features: {len(no_time_features)}")
+    print(f"Time-ablated model-input features: {len(time_ablated_features)}")
 
     missing_expected = [c for c in expected_removed if c not in removed]
     unexpected_removed = [c for c in removed if c not in TIME_LEAKAGE_COLS]
 
     if missing_expected:
-        print("[warning] expected time columns present in with-time but not listed as removed:", missing_expected)
+        print("[warning] expected time columns present in full_features but not listed as removed:", missing_expected)
     if unexpected_removed:
         print("[warning] removed columns not in TIME_LEAKAGE_COLS:", unexpected_removed)
 
@@ -194,25 +192,25 @@ def source_file_summary(data_dir, out_dir):
 
 
 def main():
-    base_data_dir = get_path_from_config("DATA_ROOT_DIR", Path(config.BASE_DIR).parent / "processed_flow_benchmark")
-    with_time_dir = get_path_from_config("WITH_TIME_DATA_DIR", base_data_dir / "with-time")
-    no_time_dir = get_path_from_config("NO_TIME_DATA_DIR", base_data_dir / "no_time")
+    base_data_dir = get_path_from_config("DATA_ROOT_DIR", config.REPO_ROOT / "data" / "processed")
+    full_features_dir = get_path_from_config("FULL_FEATURE_DATA_DIR", base_data_dir / "full_features")
+    time_ablated_dir = get_path_from_config("TIME_ABLATED_DATA_DIR", base_data_dir / "time_ablated")
 
     results_dir = Path(getattr(config, "RESULTS_DIR", Path(config.BASE_DIR) / "results"))
     out_dir = results_dir / "dataset_diagnostics"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("Dataset diagnostics")
-    print("With-time directory:", with_time_dir.resolve())
-    print("No-time directory:", no_time_dir.resolve())
+    print("Full_features directory:", full_features_dir.resolve())
+    print("Time-ablated directory:", time_ablated_dir.resolve())
     print("Output directory:", out_dir.resolve())
     print()
 
-    feature_count_summary(with_time_dir, no_time_dir, out_dir)
-    count_full_classes(no_time_dir, out_dir)
-    count_train_test_classes(no_time_dir, out_dir)
-    count_binary_distribution(no_time_dir, out_dir)
-    source_file_summary(no_time_dir, out_dir)
+    feature_count_summary(full_features_dir, time_ablated_dir, out_dir)
+    count_full_classes(time_ablated_dir, out_dir)
+    count_train_test_classes(time_ablated_dir, out_dir)
+    count_binary_distribution(time_ablated_dir, out_dir)
+    source_file_summary(time_ablated_dir, out_dir)
 
     print("\nDone.")
 

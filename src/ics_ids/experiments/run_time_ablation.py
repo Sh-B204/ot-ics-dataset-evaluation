@@ -28,8 +28,8 @@ DEFAULT_SEEDS = [42, 7, 21, 100, 2026]
 MODEL_DISPLAY = {"random_forest": "Random Forest", "xgboost": "XGBoost", "mlp": "MLP"}
 TASK_DISPLAY = {"binary": "Binary", "multiclass": "Multiclass"}
 BENCHMARKS = [
-    ("full_feature", "Full-feature", config.WITH_TIME_DATA_DIR, 49),
-    ("time_ablated", "Time-ablated", config.NO_TIME_DATA_DIR, 41),
+    ("full_features", "Full-feature", config.FULL_FEATURE_DATA_DIR, 49),
+    ("time_ablated", "Time-ablated", config.TIME_ABLATED_DATA_DIR, 41),
 ]
 
 METRICS_FOR_SUMMARY = [
@@ -121,13 +121,13 @@ def load_full_dataset(data_dir, task):
         raise FileNotFoundError(f"Missing full dataset file: {full_path}")
 
     if task == "binary":
-        feature_path = data_dir / "binary_detection_feature_list.json"
+        features_path = data_dir / "binary_detection_feature_list.json"
         label_col = config.BINARY_LABEL_COL
     else:
-        feature_path = data_dir / "multiclass_classification_feature_list.json"
+        features_path = data_dir / "multiclass_classification_feature_list.json"
         label_col = config.MULTICLASS_LABEL_COL
 
-    features = json.loads(feature_path.read_text())
+    features = json.loads(features_path.read_text())
     df = pd.read_csv(full_path)
 
     missing = [c for c in features + [label_col] if c not in df.columns]
@@ -308,7 +308,7 @@ def add_drop_columns(summary):
         out[f"{metric}_drop_full_to_ablated_mean"] = np.nan
 
     for (model, task), group in out.groupby(["model", "task"]):
-        full = group[group["benchmark"] == "full_feature"]
+        full = group[group["benchmark"] == "full_features"]
         ablated = group[group["benchmark"] == "time_ablated"]
         if full.empty or ablated.empty:
             continue
@@ -327,7 +327,7 @@ def add_drop_columns(summary):
 
 def make_paper_table(summary, out_path):
     rows = []
-    order = {"full_feature": 0, "time_ablated": 1, "mlp": 0, "random_forest": 1, "xgboost": 2, "binary": 0, "multiclass": 1}
+    order = {"full_features": 0, "time_ablated": 1, "mlp": 0, "random_forest": 1, "xgboost": 2, "binary": 0, "multiclass": 1}
     summary = summary.copy()
     summary["sort_key"] = summary.apply(lambda r: (order.get(r["task"], 9), order.get(r["model"], 9), order.get(r["benchmark"], 9)), axis=1)
     summary = summary.sort_values("sort_key")
@@ -448,7 +448,7 @@ def plot_ablation_metric(summary, task, metrics, title, save_path):
         return
 
     model_order = ["mlp", "random_forest", "xgboost"]
-    benchmark_order = ["full_feature", "time_ablated"]
+    benchmark_order = ["full_features", "time_ablated"]
     labels = []
     centers = []
     x = []
@@ -532,7 +532,7 @@ def make_plots(summary, fig_dir, pred_dir=None):
     )
     if pred_dir is not None:
         plot_binary_pr_curves(pred_dir, "time_ablated", "Time-ablated", fig_dir / "tuned_time_ablated_binary_pr_curves.png")
-        plot_binary_pr_curves(pred_dir, "full_feature", "Full-feature", fig_dir / "tuned_full_feature_binary_pr_curves.png")
+        plot_binary_pr_curves(pred_dir, "full_features", "Full-feature", fig_dir / "tuned_full_features_binary_pr_curves.png")
 
     binary_auc_metrics = ["balanced_accuracy", "false_positive_rate"]
     binary_auc_title = "Tuned Binary Imbalance-Aware Metrics"

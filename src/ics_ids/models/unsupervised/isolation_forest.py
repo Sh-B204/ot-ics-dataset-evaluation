@@ -10,14 +10,14 @@ from ... import config
 from ... import utils
 
 THRESHOLD_PERCENTILES = [80, 85, 90, 92, 95, 97, 99]
-VAL_SIZE = 0.2  # stratified split carved out of TRAIN only, never touches test
+VAL_SIZE = 0.2 
 
 
 def run():
     utils.print_header("Isolation Forest - Binary Anomaly Detection (trained on normal only)")
     X_train, y_train, X_test, y_test, _ = utils.load_binary_datasets()
 
-    # Labeled validation split used ONLY for threshold selection (fixes test-set leakage).
+    # Labeled validation split used only for threshold selection.
     X_fit, X_thresh_val, y_fit, y_thresh_val = train_test_split(
         X_train, y_train, test_size=VAL_SIZE,
         stratify=y_train, random_state=config.RANDOM_STATE,

@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -12,7 +11,6 @@ from sklearn.metrics import (
     classification_report,
 )
 from sklearn.preprocessing import label_binarize
-
 from . import config
 
 

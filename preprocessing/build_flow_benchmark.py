@@ -1,5 +1,4 @@
 import json
-import warnings
 from pathlib import Path
 import joblib
 import numpy as np
@@ -7,17 +6,11 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 
-warnings.filterwarnings("ignore")
-
-# Paths are anchored to the repo root (this file lives in preprocessing/) so
-# the script works the same regardless of the current working directory it's
-# launched from. Same folder names/meaning as before, just relocated under
-# data/ instead of the repo root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = REPO_ROOT / "data" / "raw" / "ICS_Dataset"
 OUTPUT_ROOT = REPO_ROOT / "data" / "processed"
-WITH_TIME_OUTPUT_DIR = OUTPUT_ROOT / "with-time"
-NO_TIME_OUTPUT_DIR = OUTPUT_ROOT / "no_time"
+FULL_FEATURE_OUTPUT_DIR = OUTPUT_ROOT / "full_features"
+TIME_ABLATED_OUTPUT_DIR = OUTPUT_ROOT / "time_ablated"
 
 TEST_SIZE = 0.20
 RANDOM_STATE = 42
@@ -316,10 +309,10 @@ def stratified_split(X, y):
     )
 
 
-def build_no_time_feature_list(feature_cols):
+def build_time_ablated_feature_list(feature_cols):
     removed_time_cols = [c for c in TIME_LEAKAGE_COLS if c in feature_cols]
-    no_time_feature_cols = [c for c in feature_cols if c not in removed_time_cols]
-    return no_time_feature_cols, removed_time_cols
+    time_ablated_feature_cols = [c for c in feature_cols if c not in removed_time_cols]
+    return time_ablated_feature_cols, removed_time_cols
 
 
 def save_common_diagnostics(df, inventory_df, label_map, output_dir: Path):
@@ -399,8 +392,8 @@ def scale_split_save(df, feature_cols, label_col, dataset_name, output_dir: Path
 
 
 def main():
-    ensure_dir(WITH_TIME_OUTPUT_DIR)
-    ensure_dir(NO_TIME_OUTPUT_DIR)
+    ensure_dir(FULL_FEATURE_OUTPUT_DIR)
+    ensure_dir(TIME_ABLATED_OUTPUT_DIR)
 
     files_info = discover_flow_csv_files(DATA_ROOT)
     df, inventory_df = load_and_label_all(files_info)
@@ -422,39 +415,39 @@ def main():
         df, feature_cols
     )
 
-    no_time_feature_cols, removed_time_cols = build_no_time_feature_list(feature_cols)
+    time_ablated_feature_cols, removed_time_cols = build_time_ablated_feature_list(feature_cols)
 
-    # Save the original with-time benchmark.
-    full_cols_with_time = META_COLS + feature_cols
-    df[full_cols_with_time].to_csv(WITH_TIME_OUTPUT_DIR / "full_labeled_flow_dataset.csv", index=False)
+    # Save the full-features benchmark.
+    full_cols_full_features = META_COLS + feature_cols
+    df[full_cols_full_features].to_csv(FULL_FEATURE_OUTPUT_DIR / "full_labeled_flow_dataset.csv", index=False)
 
-    binary_summary_with_time = scale_split_save(
+    binary_summary_full_features = scale_split_save(
         df=df,
         feature_cols=feature_cols,
         label_col="binary_label",
         dataset_name="binary_detection",
-        output_dir=WITH_TIME_OUTPUT_DIR
+        output_dir=FULL_FEATURE_OUTPUT_DIR
     )
 
-    multiclass_summary_with_time = scale_split_save(
+    multiclass_summary_full_features = scale_split_save(
         df=df,
         feature_cols=feature_cols,
         label_col="multiclass_label",
         dataset_name="multiclass_classification",
-        output_dir=WITH_TIME_OUTPUT_DIR
+        output_dir=FULL_FEATURE_OUTPUT_DIR
     )
 
     scenario_distribution, binary_distribution = save_common_diagnostics(
         df=df,
         inventory_df=inventory_df,
         label_map=label_map,
-        output_dir=WITH_TIME_OUTPUT_DIR
+        output_dir=FULL_FEATURE_OUTPUT_DIR
     )
 
-    metadata_with_time = {
-        "benchmark_variant": "with_time",
+    metadata_full_features = {
+        "benchmark_variant": "full_features",
         "data_root": str(DATA_ROOT),
-        "output_dir": str(WITH_TIME_OUTPUT_DIR),
+        "output_dir": str(FULL_FEATURE_OUTPUT_DIR),
         "random_state": RANDOM_STATE,
         "test_size": TEST_SIZE,
         "sample_unit": "one network flow row",
@@ -479,45 +472,45 @@ def main():
         "dropped_high_cardinality_text_columns": dropped_text_cols,
         "constant_columns_dropped": constant_cols,
         "missing_values_before_imputation": missing_before,
-        "binary_dataset": binary_summary_with_time,
-        "multiclass_dataset": multiclass_summary_with_time
+        "binary_dataset": binary_summary_full_features,
+        "multiclass_dataset": multiclass_summary_full_features
     }
 
-    (WITH_TIME_OUTPUT_DIR / "preprocessing_metadata.json").write_text(
-        json.dumps(metadata_with_time, indent=2, default=str)
+    (FULL_FEATURE_OUTPUT_DIR / "preprocessing_metadata.json").write_text(
+        json.dumps(metadata_full_features, indent=2, default=str)
     )
 
-    # Save the no-time benchmark used for temporal-leakage ablation.
-    full_cols_no_time = META_COLS + no_time_feature_cols
-    df[full_cols_no_time].to_csv(NO_TIME_OUTPUT_DIR / "full_labeled_flow_dataset.csv", index=False)
+    # Save the time-ablated benchmark used for temporal-leakage ablation.
+    full_cols_time_ablated = META_COLS + time_ablated_feature_cols
+    df[full_cols_time_ablated].to_csv(TIME_ABLATED_OUTPUT_DIR / "full_labeled_flow_dataset.csv", index=False)
 
-    binary_summary_no_time = scale_split_save(
+    binary_summary_time_ablated = scale_split_save(
         df=df,
-        feature_cols=no_time_feature_cols,
+        feature_cols=time_ablated_feature_cols,
         label_col="binary_label",
         dataset_name="binary_detection",
-        output_dir=NO_TIME_OUTPUT_DIR
+        output_dir=TIME_ABLATED_OUTPUT_DIR
     )
 
-    multiclass_summary_no_time = scale_split_save(
+    multiclass_summary_time_ablated = scale_split_save(
         df=df,
-        feature_cols=no_time_feature_cols,
+        feature_cols=time_ablated_feature_cols,
         label_col="multiclass_label",
         dataset_name="multiclass_classification",
-        output_dir=NO_TIME_OUTPUT_DIR
+        output_dir=TIME_ABLATED_OUTPUT_DIR
     )
 
     save_common_diagnostics(
         df=df,
         inventory_df=inventory_df,
         label_map=label_map,
-        output_dir=NO_TIME_OUTPUT_DIR
+        output_dir=TIME_ABLATED_OUTPUT_DIR
     )
 
-    metadata_no_time = {
-        "benchmark_variant": "no_time",
+    metadata_time_ablated = {
+        "benchmark_variant": "time_ablated",
         "data_root": str(DATA_ROOT),
-        "output_dir": str(NO_TIME_OUTPUT_DIR),
+        "output_dir": str(TIME_ABLATED_OUTPUT_DIR),
         "random_state": RANDOM_STATE,
         "test_size": TEST_SIZE,
         "sample_unit": "one network flow row",
@@ -534,8 +527,8 @@ def main():
         },
         "n_source_files": int(len(files_info)),
         "n_total_rows": int(len(df)),
-        "n_features_original_with_time": int(len(feature_cols)),
-        "n_features_final": int(len(no_time_feature_cols)),
+        "n_features_full_features": int(len(feature_cols)),
+        "n_features_final": int(len(time_ablated_feature_cols)),
         "label_map": label_map,
         "created_time_features": created_time_cols,
         "protocol_source_column": protocol_source_col,
@@ -545,22 +538,22 @@ def main():
         "dropped_high_cardinality_text_columns": dropped_text_cols,
         "constant_columns_dropped": constant_cols,
         "missing_values_before_imputation": missing_before,
-        "binary_dataset": binary_summary_no_time,
-        "multiclass_dataset": multiclass_summary_no_time
+        "binary_dataset": binary_summary_time_ablated,
+        "multiclass_dataset": multiclass_summary_time_ablated
     }
 
-    (NO_TIME_OUTPUT_DIR / "preprocessing_metadata.json").write_text(
-        json.dumps(metadata_no_time, indent=2, default=str)
+    (TIME_ABLATED_OUTPUT_DIR / "preprocessing_metadata.json").write_text(
+        json.dumps(metadata_time_ablated, indent=2, default=str)
     )
 
     print("Done.")
     print(f"Source files used: {len(files_info)}")
     print(f"Total rows: {len(df)}")
-    print(f"With-time features: {len(feature_cols)}")
+    print(f"Full-features features: {len(feature_cols)}")
     print(f"Removed time/capture-position features: {len(removed_time_cols)}")
-    print(f"No-time features: {len(no_time_feature_cols)}")
-    print(f"With-time output directory: {WITH_TIME_OUTPUT_DIR.resolve()}")
-    print(f"No-time output directory: {NO_TIME_OUTPUT_DIR.resolve()}")
+    print(f"Time-ablated features: {len(time_ablated_feature_cols)}")
+    print(f"Full-features output directory: {FULL_FEATURE_OUTPUT_DIR.resolve()}")
+    print(f"Time-ablated output directory: {TIME_ABLATED_OUTPUT_DIR.resolve()}")
     print("\nRemoved time/capture-position columns:")
     print(removed_time_cols)
     print("\nScenario distribution:")

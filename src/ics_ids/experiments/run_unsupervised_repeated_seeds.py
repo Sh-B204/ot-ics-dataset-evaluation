@@ -1,8 +1,6 @@
 import argparse
-import json
 import time
 from pathlib import Path
-
 import joblib
 import matplotlib
 matplotlib.use("Agg")
@@ -12,7 +10,6 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_auc_score, roc_curve, precision_recall_curve, average_precision_score, balanced_accuracy_score
 from sklearn.model_selection import train_test_split
-
 from .. import config
 from .. import utils
 
@@ -26,8 +23,7 @@ TEST_SIZE = 0.2
 EPOCHS = 100
 BATCH_SIZE = 256
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]  # experiments -> ics_ids -> src -> repo root
-DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "processed" / "no_time"
+DEFAULT_DATA_DIR = config.TIME_ABLATED_DATA_DIR
 OUTPUT_DIR = config.RESULTS_DIR / "unsupervised_robustness"
 FIGURE_DIR = config.FIGURES_DIR / "unsupervised_robustness"
 
@@ -445,7 +441,7 @@ def regenerate_plots_from_existing(output_dir=OUTPUT_DIR, figure_dir=FIGURE_DIR)
 
 def main():
     parser = argparse.ArgumentParser(description="Repeated-seed unsupervised binary anomaly detection on the time-ablated benchmark.")
-    parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Path to processed_flow_benchmark/no_time.")
+    parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Path to the time-ablated processed benchmark.")
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR), help="Output directory for unsupervised result CSVs.")
     parser.add_argument("--figure-dir", default=str(FIGURE_DIR), help="Output directory for unsupervised figures.")
     parser.add_argument("--models", nargs="+", default=UNSUPERVISED_MODELS, choices=UNSUPERVISED_MODELS)

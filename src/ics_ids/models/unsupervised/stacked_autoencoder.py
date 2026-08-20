@@ -10,14 +10,12 @@ from ... import config
 from ... import utils
 
 THRESHOLD_PERCENTILES = [80, 85, 90, 92, 95, 97, 99]
-VAL_SIZE = 0.2  # stratified split carved out of TRAIN only, for threshold selection
+VAL_SIZE = 0.2  
 EPOCHS = 100
 BATCH_SIZE = 256
 
 
 def build_autoencoder(input_dim):
-    # Bottleneck restored to 8 (was over-compressed to 3, which hurt reconstruction
-    # fidelity on normal traffic and made the error less discriminative).
     inputs = layers.Input(shape=(input_dim,))
     x = layers.Dense(32, activation="relu")(inputs)
     x = layers.Dense(16, activation="relu")(x)
@@ -40,7 +38,7 @@ def run():
     X_test_arr = X_test.to_numpy(dtype="float32")
     y_test_arr = y_test.to_numpy()
 
-    # Labeled validation split used ONLY for threshold selection (fixes test-set leakage).
+    # Labeled validation split used only for threshold selection.
     X_fit, X_thresh_val, y_fit, y_thresh_val = train_test_split(
         X_train, y_train, test_size=VAL_SIZE,
         stratify=y_train, random_state=config.RANDOM_STATE,

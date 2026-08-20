@@ -1,17 +1,13 @@
-# Path setup only — repo was reorganized so config.py now lives at
-# src/ics_ids/config.py instead of ics_model_eval/config.py. All paths below
-# point to the same relative structure as before, just anchored to the new
-# repo root instead of the old ics_model_eval/ folder.
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-REPO_ROOT = BASE_DIR.parent.parent  # src/ics_ids -> src -> repo root
+REPO_ROOT = BASE_DIR.parent.parent 
 
 DATA_ROOT_DIR = REPO_ROOT / "data" / "processed"
-WITH_TIME_DATA_DIR = DATA_ROOT_DIR / "with-time"
-NO_TIME_DATA_DIR = DATA_ROOT_DIR / "no_time"
+FULL_FEATURE_DATA_DIR = DATA_ROOT_DIR / "full_features"
+TIME_ABLATED_DATA_DIR = DATA_ROOT_DIR / "time_ablated"
 
-DATA_DIR = NO_TIME_DATA_DIR
+DATA_DIR = TIME_ABLATED_DATA_DIR
 RESULTS_DIR = REPO_ROOT / "results"
 MODELS_DIR = RESULTS_DIR / "models"
 METRICS_DIR = RESULTS_DIR / "metrics"

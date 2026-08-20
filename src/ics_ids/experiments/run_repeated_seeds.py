@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument("--models", nargs="+", default=["random_forest", "xgboost", "mlp"], choices=["random_forest", "xgboost", "mlp"])
     parser.add_argument("--tasks", nargs="+", default=["binary", "multiclass"], choices=["binary", "multiclass"])
     parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
-    parser.add_argument("--data-dir", default=str(config.NO_TIME_DATA_DIR), help="Dataset directory. Default: time-ablated benchmark.")
+    parser.add_argument("--data-dir", default=str(config.TIME_ABLATED_DATA_DIR), help="Dataset directory. Default: time-ablated benchmark.")
     parser.add_argument("--best-params", default=str(config.RESULTS_DIR / "hyperparameter_study" / "best_hyperparameters.json"))
     parser.add_argument("--output-dir", default=str(config.RESULTS_DIR / "robustness"))
     parser.add_argument("--plot-only", action="store_true", help="Regenerate repeated-seed figures from existing CSV files without retraining.")
