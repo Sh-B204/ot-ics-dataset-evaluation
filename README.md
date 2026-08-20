@@ -37,7 +37,7 @@ export PYTHONPATH="$PWD/src"
 
 ## Dataset preparation
 
-Raw and processed datasets are not committed to the repository because of their size. See [`data/README.md`](data/README.md).
+Raw and processed datasets are not committed to the repository. See [`data/README.md`](data/README.md).
 
 To build the two processed benchmarks:
 
