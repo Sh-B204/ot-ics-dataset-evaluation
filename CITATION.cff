@@ -1,17 +1,8 @@
 cff-version: 1.2.0
-message: "If you use this repository, please cite the associated paper."
-title: "ICS Intrusion Detection Benchmark"
+message: "If you use this software, please cite this repository."
+title: "OT/ICS Dataset Evaluation"
 type: software
 authors:
-  - family-names: "<FAMILY_NAME>"
-    given-names: "<GIVEN_NAME>"
-    affiliation: "<AFFILIATION>"
-preferred-citation:
-  type: article
-  title: "<PAPER_TITLE>"
-  authors:
-    - family-names: "<FAMILY_NAME>"
-      given-names: "<GIVEN_NAME>"
-  journal: "<JOURNAL_OR_VENUE>"
-  year: <YEAR>
-  doi: "<DOI>"
+  - name: "Sh-B204"
+repository-code: "https://github.com/Sh-B204/ot-ics-dataset-evaluation"
+url: "https://github.com/Sh-B204/ot-ics-dataset-evaluation"

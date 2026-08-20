@@ -1,3 +1,0 @@
-benchmark_version,feature_count,removed_feature_count,removed_features
-with_time,49,0,
-no_time,41,8,startOffset; endOffset; raw_start_time; raw_end_time; event_time_seconds; event_end_seconds; start_seconds_of_day; end_seconds_of_day

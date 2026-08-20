@@ -3,7 +3,6 @@ import ast
 import json
 import time
 from pathlib import Path
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -12,21 +11,30 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import average_precision_score, precision_recall_curve
+from sklearn.preprocessing import RobustScaler, label_binarize
+from sklearn.metrics import (
+    average_precision_score,
+    precision_recall_curve,
+    roc_curve, auc,
+)
 from sklearn.utils.class_weight import compute_sample_weight
-
 try:
     from xgboost import XGBClassifier
 except ImportError:
     XGBClassifier = None
-
 from .. import config
 from .. import utils
 
 DEFAULT_SEEDS = [42, 7, 21, 100, 2026]
 MODEL_DISPLAY = {"random_forest": "Random Forest", "xgboost": "XGBoost", "mlp": "MLP"}
 TASK_DISPLAY = {"binary": "Binary", "multiclass": "Multiclass"}
+
+MODEL_ORDER = ["mlp", "random_forest", "xgboost"]
+MODEL_COLORS = {
+    "mlp": "#1f77b4",            
+    "random_forest": "#ff7f0e",  
+    "xgboost": "#2ca02c",       
+}
 
 METRICS_FOR_SUMMARY = [
     "accuracy", "precision", "recall", "f1_score", "balanced_accuracy", "false_positive_rate", "roc_auc", "pr_auc",
@@ -221,7 +229,7 @@ def run_one(model_key, task, base_params, seed, data_dir, cached_data, pred_dir=
     X_train, X_test, y_train, y_test = split_and_scale(X, y, seed)
 
     start = time.time()
-    _, y_pred, y_prob = train_predict(model_key, task, params, X_train, y_train, X_test)
+    model, y_pred, y_prob = train_predict(model_key, task, params, X_train, y_train, X_test)
     training_time = time.time() - start
 
     if task == "binary":
@@ -238,6 +246,12 @@ def run_one(model_key, task, base_params, seed, data_dir, cached_data, pred_dir=
         metrics = utils.multiclass_metrics(y_test, y_pred, labels=labels, y_prob=y_prob, data_dir=data_dir)
         objective_metric = "macro_f1"
         objective_score = metrics["macro_f1"]
+        # Save the already-computed per-class probabilities so the final
+        # multiclass micro-average ROC figure can be reproduced without
+        # retraining. This does not change what train_predict computes.
+        if pred_dir is not None and y_prob is not None:
+            class_labels = list(getattr(model, "classes_", labels))
+            save_multiclass_prediction_probabilities(pred_dir, model_key, seed, y_test, y_pred, y_prob, class_labels)
 
     metrics.update({
         "model": model_key,
@@ -329,176 +343,420 @@ def save_binary_prediction_scores(pred_dir, model_key, seed, y_true, y_pred, y_s
     df.to_csv(out_path, index=False)
 
 
-def _mean_pr_curve_from_files(files):
-    recall_grid = np.linspace(0.0, 1.0, 300)
-    precision_rows = []
-    ap_scores = []
+def save_multiclass_prediction_probabilities(pred_dir, model_key, seed, y_true, y_pred, y_prob, class_labels):
+    """Save the already-computed y_true/y_pred/per-class probabilities for a
+    multiclass repeated-seed run, so the final multiclass micro-average ROC
+    figure can be reproduced from disk without retraining. Does not affect
+    any prediction, metric, or result calculation.
+    """
+    pred_dir = Path(pred_dir)
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "model": model_key,
+        "seed": int(seed),
+        "y_true": np.asarray(y_true),
+        "y_pred": np.asarray(y_pred),
+    }
+    y_prob = np.asarray(y_prob)
+    for idx, label in enumerate(class_labels):
+        data[f"class_{label}_probability"] = y_prob[:, idx]
+    df = pd.DataFrame(data)
+    out_path = pred_dir / f"{model_key}_multiclass_seed{seed}_probabilities.csv"
+    df.to_csv(out_path, index=False)
+
+
+# =========================================================
+# Final repeated-seed paper figures
+# =========================================================
+def mean_roc_curve_from_files(files):
+    fpr_grid = np.linspace(0.0, 1.0, 400)
+    tpr_rows = []
+    auc_scores = []
+
     for file_path in files:
         df = pd.read_csv(file_path)
-        if "y_score" not in df.columns or df["y_score"].isna().all():
+        if "y_true" not in df.columns or "y_score" not in df.columns:
             continue
+
         y_true = df["y_true"].astype(int).to_numpy()
         y_score = df["y_score"].astype(float).to_numpy()
+
+        fpr, tpr, _ = roc_curve(y_true, y_score)
+        roc_auc = auc(fpr, tpr)
+
+        tpr_interp = np.interp(fpr_grid, fpr, tpr)
+        tpr_interp[0] = 0.0
+        tpr_rows.append(tpr_interp)
+        auc_scores.append(roc_auc)
+
+    if not tpr_rows:
+        return None
+
+    tpr_arr = np.vstack(tpr_rows)
+    mean_tpr = tpr_arr.mean(axis=0)
+    mean_tpr[-1] = 1.0
+
+    return {
+        "fpr_grid": fpr_grid,
+        "tpr_mean": mean_tpr,
+        "tpr_std": tpr_arr.std(axis=0, ddof=1) if tpr_arr.shape[0] > 1 else np.zeros_like(fpr_grid),
+        "auc_mean": float(np.mean(auc_scores)),
+        "auc_std": float(np.std(auc_scores, ddof=1)) if len(auc_scores) > 1 else 0.0,
+    }
+
+
+def mean_pr_curve_from_files(files):
+    recall_grid = np.linspace(0.0, 1.0, 400)
+    precision_rows = []
+    ap_scores = []
+
+    for file_path in files:
+        df = pd.read_csv(file_path)
+        if "y_true" not in df.columns or "y_score" not in df.columns:
+            continue
+
+        y_true = df["y_true"].astype(int).to_numpy()
+        y_score = df["y_score"].astype(float).to_numpy()
+
         precision, recall, _ = precision_recall_curve(y_true, y_score)
-        ap_scores.append(average_precision_score(y_true, y_score))
+        pr_auc = average_precision_score(y_true, y_score)
 
         recall_asc = recall[::-1]
         precision_asc = precision[::-1]
+
         precision_interp = np.interp(recall_grid, recall_asc, precision_asc)
         precision_rows.append(precision_interp)
+        ap_scores.append(pr_auc)
 
     if not precision_rows:
         return None
 
     precision_arr = np.vstack(precision_rows)
+
     return {
         "recall_grid": recall_grid,
         "precision_mean": precision_arr.mean(axis=0),
         "precision_std": precision_arr.std(axis=0, ddof=1) if precision_arr.shape[0] > 1 else np.zeros_like(recall_grid),
         "ap_mean": float(np.mean(ap_scores)),
         "ap_std": float(np.std(ap_scores, ddof=1)) if len(ap_scores) > 1 else 0.0,
-        "n_curves": len(ap_scores),
     }
 
 
-def plot_binary_pr_curves(pred_dir, save_path):
+def plot_supervised_binary_roc_pr(pred_dir, fig_dir):
+    """Final paper ROC/PR figure for binary repeated-seed results.
+
+    Same implementation/style as the former paper_figures.plot_supervised_binary_roc_pr():
+    400-point interpolation, mean curves with std bands across seeds, exact
+    model colors, ROC-AUC/PR-AUC mean +/- SD, 300 DPI.
+    """
     pred_dir = Path(pred_dir)
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig_dir = Path(fig_dir)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, axes = plt.subplots(1, 2, figsize=(8.8, 4.8))
+    ax_roc, ax_pr = axes
 
     any_curve = False
-    for model_key in ["mlp", "random_forest", "xgboost"]:
+
+    for model_key in MODEL_ORDER:
         files = sorted(pred_dir.glob(f"{model_key}_binary_seed*_predictions.csv"))
-        curve = _mean_pr_curve_from_files(files)
-        if curve is None:
+
+        if not files:
+            print(f"[skip] no repeated-seed binary files found for {model_key}")
             continue
 
-        label = f"{MODEL_DISPLAY[model_key]} (PR-AUC={curve['ap_mean']:.3f}±{curve['ap_std']:.3f})"
-        ax.plot(curve["recall_grid"], curve["precision_mean"], linewidth=2, label=label)
-        ax.fill_between(
-            curve["recall_grid"],
-            np.maximum(0, curve["precision_mean"] - curve["precision_std"]),
-            np.minimum(1, curve["precision_mean"] + curve["precision_std"]),
-            alpha=0.12,
+        roc_info = mean_roc_curve_from_files(files)
+        pr_info = mean_pr_curve_from_files(files)
+
+        if roc_info is None or pr_info is None:
+            continue
+
+        color = MODEL_COLORS[model_key]
+        model_name = MODEL_DISPLAY[model_key]
+
+        roc_label = f"{model_name}, ROC-AUC={roc_info['auc_mean']:.3f}±{roc_info['auc_std']:.3f}"
+        ax_roc.plot(roc_info["fpr_grid"], roc_info["tpr_mean"], color=color, linewidth=2, label=roc_label)
+        ax_roc.fill_between(
+            roc_info["fpr_grid"],
+            np.maximum(0, roc_info["tpr_mean"] - roc_info["tpr_std"]),
+            np.minimum(1, roc_info["tpr_mean"] + roc_info["tpr_std"]),
+            color=color, alpha=0.10
+        )
+
+        pr_label = f"{model_name}, PR-AUC={pr_info['ap_mean']:.3f}±{pr_info['ap_std']:.3f}"
+        ax_pr.plot(pr_info["recall_grid"], pr_info["precision_mean"], color=color, linewidth=2, label=pr_label)
+        ax_pr.fill_between(
+            pr_info["recall_grid"],
+            np.maximum(0, pr_info["precision_mean"] - pr_info["precision_std"]),
+            np.minimum(1, pr_info["precision_mean"] + pr_info["precision_std"]),
+            color=color, alpha=0.10
+        )
+
+        any_curve = True
+
+    if not any_curve:
+        print("[error] no binary repeated-seed prediction files were found.")
+        plt.close(fig)
+        return
+
+    ax_roc.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=1)
+    ax_roc.set_title("ROC Curve", fontsize=11)
+    ax_roc.set_xlabel("False Positive Rate")
+    ax_roc.set_ylabel("True Positive Rate")
+    ax_roc.set_xlim(0, 1)
+    ax_roc.set_ylim(0, 1.02)
+    ax_roc.grid(alpha=0.35)
+    ax_roc.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), frameon=True, fontsize=8.5)
+
+    ax_pr.set_title("PR Curve", fontsize=11)
+    ax_pr.set_xlabel("Recall")
+    ax_pr.set_ylabel("Precision")
+    ax_pr.set_xlim(0, 1)
+    ax_pr.set_ylim(0, 1.02)
+    ax_pr.grid(alpha=0.35)
+    ax_pr.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), frameon=True, fontsize=8.5)
+
+    fig.suptitle("Binary Attack Detection - ROC Curve (left) and PR Curve (right)", fontsize=12, y=0.98)
+    fig.subplots_adjust(top=0.87, bottom=0.27, wspace=0.28)
+
+    save_path = fig_dir / "supervised_binary_roc_pr_curves.png"
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[saved] {save_path}")
+
+
+def resolve_multiclass_probability_csv_for_model(model_key, out_dir):
+    out_dir = Path(out_dir)
+    results_path = out_dir / "repeated_seed_results.csv"
+    if not results_path.exists():
+        print(f"[skip] missing {results_path}; cannot resolve multiclass probabilities for {model_key}")
+        return None
+    df = pd.read_csv(results_path)
+    sub = df[(df["task"] == "multiclass") & (df["model"] == model_key)].copy()
+    if sub.empty:
+        print(f"[skip] no multiclass repeated-seed results found for {model_key}")
+        return None
+    best_row = sub.sort_values("macro_f1", ascending=False).iloc[0]
+    best_seed = int(best_row["seed"])
+    probability_path = out_dir / "predictions" / f"{model_key}_multiclass_seed{best_seed}_probabilities.csv"
+    if not probability_path.exists():
+        print(f"[skip] missing multiclass probability file: {probability_path}")
+        return None
+    print(f"[info] using repeated-seed multiclass probability file: {probability_path.name}")
+    return probability_path
+
+
+def plot_supervised_multiclass_micro_roc(out_dir, figure_dir):
+    """
+    Plot micro-average multiclass ROC curves for the supervised models.
+
+    Uses the saved multiclass probability outputs and reproduces the
+    final visualization style used for the supervised multiclass ROC figure.
+    """
+    out_dir = Path(out_dir)
+    fig_dir = Path(figure_dir)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    any_curve = False
+
+    for model_key in MODEL_ORDER:
+        resolved = resolve_multiclass_probability_csv_for_model(model_key, out_dir)
+
+        if resolved is None:
+            print(f"[skip] no multiclass probability file found for {model_key}")
+            continue
+
+        # Support the existing resolver whether it returns only a Path
+        # or a tuple containing the Path plus metadata.
+        probability_path = Path(resolved)
+        df = pd.read_csv(probability_path)
+
+        if "y_true" not in df.columns:
+            print(f"[skip] missing y_true in {probability_path.name}")
+            continue
+
+        prob_cols = [c for c in df.columns if c.startswith("class_") and c.endswith("_probability")]
+
+        if not prob_cols:
+            print(f"[skip] no per-class probability columns found in {probability_path.name}")
+            continue
+
+        y_true = df["y_true"].astype(int).to_numpy()
+        y_score = df[prob_cols].astype(float).to_numpy()
+        labels = list(range(len(prob_cols)))
+        y_true_bin = label_binarize(y_true, classes=labels)
+        fpr, tpr, _ = roc_curve(y_true_bin.ravel(), y_score.ravel())
+        micro_auc = auc(fpr, tpr)
+
+        ax.plot(
+            fpr,
+            tpr,
+            linewidth=2.5,
+            color=MODEL_COLORS[model_key],
+            label=f"{MODEL_DISPLAY[model_key]}, micro ROC-AUC={micro_auc:.3f}"
         )
         any_curve = True
 
     if not any_curve:
         plt.close(fig)
-        print("[skip] no prediction score files found for repeated-seed PR curves")
+        print("[skip] no multiclass probability files available for micro-average ROC curves")
         return
 
-    ax.set_title("Repeated-Seed Binary PR Curves")
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
+    # Random-classifier reference line
+    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=1.5)
+
+    # Match the original figure layout
+    ax.set_title("Micro-average ROC Curve", fontsize=17, pad=10)
+    ax.set_xlabel("False Positive Rate", fontsize=15)
+    ax.set_ylabel("True Positive Rate", fontsize=15)
     ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1.05)
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), frameon=True)
-    fig.tight_layout()
+    ax.set_ylim(0, 1.02)
+    ax.tick_params(axis="both", labelsize=13)
+    ax.grid(alpha=0.30)
+
+    # Legend below the plot, as in the original figure
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=1, frameon=True, fontsize=12)
+
+    fig.suptitle("Multiclass Attack Classification - Micro-average ROC Curves", fontsize=18, y=0.98)
+
+    # Leave room for title and legend
+    fig.subplots_adjust(top=0.84, bottom=0.25, left=0.11, right=0.97)
+
+    save_path = fig_dir / "supervised_multiclass_micro_roc_curves.png"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    print(f"[saved] {save_path}")
 
+def plot_repeated_seed_stability(out_dir, fig_dir):
+    """Final paper-ready repeated-seed stability figure.
 
-def plot_grouped_metric(summary, task, metrics, title, save_path):
-    df = summary[summary["task"] == task].copy()
-    if df.empty:
+    Left: Binary F1-score across five stratified seeds.
+    Right: Multiclass Macro F1-score across five stratified seeds.
+    Legend: Model (Binary mean±SD / Multiclass mean±SD)
+
+    Same implementation/style as the former paper_figures.plot_repeated_seed_stability().
+    """
+    out_dir = Path(out_dir)
+    fig_dir = Path(fig_dir)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    results_path = out_dir / "repeated_seed_results.csv"
+    if not results_path.exists():
+        print(f"[skip] repeated-seed results not found: {results_path}")
         return
-    order = ["mlp", "random_forest", "xgboost"]
-    df["order"] = df["model"].map({m: i for i, m in enumerate(order)})
-    df = df.sort_values("order")
-    labels = df["model_display"].tolist()
-    x = np.arange(len(labels))
-    width = 0.8 / len(metrics)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    for i, metric in enumerate(metrics):
-        means = [df.iloc[j].get(f"{metric}_mean", np.nan) * 100 for j in range(len(df))]
-        stds = [df.iloc[j].get(f"{metric}_std", np.nan) * 100 for j in range(len(df))]
-        ax.bar(
-            x + (i - (len(metrics) - 1) / 2) * width,
-            means, width, yerr=stds, capsize=4,
-            label=METRIC_LABELS.get(metric, metric.replace("_", " ").title())
-        )
+    df = pd.read_csv(results_path)
 
-    ax.set_title(title)
-    ax.set_ylabel("Score (%)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_ylim(0, 105)
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=len(metrics), frameon=True)
-    fig.tight_layout()
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+    required_cols = {"model", "task", "seed", "objective_score"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in repeated_seed_results.csv: {missing}")
 
-
-def plot_objective_by_seed(results_df, save_path):
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=False)
     seed_order = DEFAULT_SEEDS
-    seed_labels = [f"Seed {s}" for s in seed_order]
-    x_positions = np.arange(len(seed_order))
+    seed_labels = [str(seed) for seed in seed_order]
+    x = np.arange(len(seed_order))
+
+    task_settings = {
+        "binary": {"title": "Binary Attack Detection", "ylabel": "F1-score (%)"},
+        "multiclass": {"title": "Multiclass Attack Classification", "ylabel": "Macro F1-score (%)"},
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.8, 5.7), sharey=False)
+    fig.suptitle("Repeated-Seed Stability of Tuned Supervised Models", fontsize=17, y=0.975)
+
+    legend_handles = []
+    legend_labels = []
+    model_summaries = {}
+
+    for model_key in MODEL_ORDER:
+        model_summaries[model_key] = {}
+        for task in ["binary", "multiclass"]:
+            sub = df[(df["model"] == model_key) & (df["task"] == task)].copy()
+            vals = pd.to_numeric(sub["objective_score"], errors="coerce").dropna()
+            if len(vals) > 0:
+                model_summaries[model_key][task] = {
+                    "mean": vals.mean() * 100,
+                    "std": vals.std(ddof=1) * 100 if len(vals) > 1 else 0.0,
+                }
 
     for ax, task in zip(axes, ["binary", "multiclass"]):
-        sub = results_df[results_df["task"] == task].copy()
-        if sub.empty:
-            continue
+        task_df = df[df["task"] == task].copy()
+        all_values = []
 
-        for model, group in sub.groupby("model"):
-            group = group.copy()
-            group["seed"] = group["seed"].astype(int)
+        for model_key in MODEL_ORDER:
+            model_df = task_df[task_df["model"] == model_key].copy()
+            if model_df.empty:
+                continue
+
+            model_df["seed"] = model_df["seed"].astype(int)
             values = []
             for seed in seed_order:
-                seed_row = group[group["seed"] == seed]
+                seed_row = model_df[model_df["seed"] == seed]
                 values.append(seed_row["objective_score"].iloc[0] * 100 if not seed_row.empty else np.nan)
-            ax.plot(x_positions, values, marker="o", linewidth=2, label=MODEL_DISPLAY.get(model, model))
 
-        objective = "F1-score" if task == "binary" else "Macro F1-score"
-        ax.set_title(f"{TASK_DISPLAY[task]} objective across repeated seeds")
-        ax.set_xlabel("Repeated seed split")
-        ax.set_ylabel(f"{objective} (%)")
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(seed_labels, rotation=30, ha="right")
-        ax.grid(alpha=0.3)
-        ax.legend(frameon=True)
+            valid_values = [v for v in values if not np.isnan(v)]
+            all_values.extend(valid_values)
 
-    fig.tight_layout()
-    save_path.parent.mkdir(parents=True, exist_ok=True)
+            line, = ax.plot(
+                x, values, marker="o", markersize=7.5, linewidth=2.6,
+                color=MODEL_COLORS[model_key], label=MODEL_DISPLAY[model_key]
+            )
+
+            if task == "binary":
+                legend_handles.append(line)
+
+        ax.set_title(task_settings[task]["title"], fontsize=14, pad=9)
+        ax.set_ylabel(task_settings[task]["ylabel"], fontsize=12.5)
+        ax.set_xlabel("Seed", fontsize=12.5)
+        ax.set_xticks(x)
+        ax.set_xticklabels(seed_labels, fontsize=11.5)
+        ax.tick_params(axis="y", labelsize=11.5)
+        ax.grid(alpha=0.28, linewidth=0.8)
+
+        if all_values:
+            ymin = min(all_values)
+            ymax = max(all_values)
+            spread = ymax - ymin
+            padding = max(1.2, spread * 0.14)
+            ax.set_ylim(ymin - padding, ymax + padding)
+
+    for model_key in MODEL_ORDER:
+        binary_summary = model_summaries[model_key].get("binary")
+        multiclass_summary = model_summaries[model_key].get("multiclass")
+
+        if binary_summary and multiclass_summary:
+            label = (
+                f"{MODEL_DISPLAY[model_key]} "
+                f"({binary_summary['mean']:.2f}±{binary_summary['std']:.2f} / "
+                f"{multiclass_summary['mean']:.2f}±{multiclass_summary['std']:.2f})"
+            )
+        else:
+            label = MODEL_DISPLAY[model_key]
+
+        legend_labels.append(label)
+
+    fig.legend(
+        legend_handles, legend_labels, loc="lower center", bbox_to_anchor=(0.5, 0.015),
+        ncol=3, frameon=True, fontsize=10.2, handlelength=2.3, columnspacing=1.8
+    )
+
+    fig.subplots_adjust(left=0.075, right=0.985, top=0.855, bottom=0.205, wspace=0.21)
+
+    save_path = fig_dir / "repeated_seed_stability.png"
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    print(f"[saved] {save_path}")
 
 
-def make_plots(results_df, summary, fig_dir, pred_dir=None):
+def make_final_plots(out_dir, fig_dir):
+    """Generate the final repeated-seed paper figures only."""
+    out_dir = Path(out_dir)
+    fig_dir = Path(fig_dir)
     fig_dir.mkdir(parents=True, exist_ok=True)
-    plot_grouped_metric(
-        summary, "binary", ["f1_score", "recall", "precision"],
-        "Repeated-Seed Binary Detection Results",
-        fig_dir / "repeated_seed_binary_f1_recall_precision.png"
-    )
-    if pred_dir is not None:
-        plot_binary_pr_curves(pred_dir, fig_dir / "repeated_seed_binary_pr_curves.png")
-
-    binary_auc_metrics = ["balanced_accuracy", "false_positive_rate"]
-    binary_auc_title = "Repeated-Seed Binary Imbalance-Aware Results"
-    binary_auc_path = fig_dir / "repeated_seed_binary_balanced_accuracy_fpr.png"
-    if "pr_auc_mean" in summary.columns and summary["pr_auc_mean"].notna().any():
-        binary_auc_metrics = ["pr_auc", "balanced_accuracy", "false_positive_rate"]
-        binary_auc_title = "Repeated-Seed Binary PR-AUC, Balanced Accuracy, and FPR"
-        binary_auc_path = fig_dir / "repeated_seed_binary_pr_auc_balanced_accuracy_fpr.png"
-    plot_grouped_metric(summary, "binary", binary_auc_metrics, binary_auc_title, binary_auc_path)
-
-    plot_grouped_metric(
-        summary, "multiclass", ["macro_f1", "macro_recall", "macro_precision"],
-        "Repeated-Seed Multiclass Macro Results",
-        fig_dir / "repeated_seed_multiclass_macro_metrics.png"
-    )
-    plot_grouped_metric(
-        summary, "multiclass", ["weighted_f1", "micro_roc_auc"],
-        "Repeated-Seed Multiclass Aggregate Results",
-        fig_dir / "repeated_seed_multiclass_weighted_micro.png"
-    )
-    plot_objective_by_seed(results_df, fig_dir / "repeated_seed_objective_by_seed.png")
+    pred_dir = out_dir / "predictions"
+    plot_supervised_binary_roc_pr(pred_dir, fig_dir)
+    plot_supervised_multiclass_micro_roc(out_dir, fig_dir)
+    plot_repeated_seed_stability(out_dir, fig_dir)
 
 
 def regenerate_plots_from_existing(out_dir, fig_dir):
@@ -512,9 +770,7 @@ def regenerate_plots_from_existing(out_dir, fig_dir):
     summary = summarize_results(results)
     summary.to_csv(summary_path, index=False)
     make_paper_table(summary, out_dir / "repeated_seed_summary_paper_format.csv")
-    make_plots(results, summary, fig_dir, out_dir / "predictions")
-    if "pr_auc_mean" not in summary.columns or summary["pr_auc_mean"].isna().all():
-        print("[note] PR-AUC was not in the existing CSV, so PR-AUC figures cannot be generated without rerunning the models with score saving enabled.")
+    make_final_plots(out_dir, fig_dir)
     print(f"[saved figures] {fig_dir.resolve()}")
 
 
@@ -572,7 +828,7 @@ def main():
     make_paper_table(summary, paper_path)
     print(f"[saved] {paper_path}")
 
-    make_plots(results, summary, fig_dir, out_dir / "predictions")
+    make_final_plots(out_dir, fig_dir)
     print(f"[saved figures] {fig_dir.resolve()}")
     print("Done.")
 

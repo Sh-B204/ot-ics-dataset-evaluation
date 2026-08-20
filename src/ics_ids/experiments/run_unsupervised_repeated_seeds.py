@@ -397,31 +397,6 @@ def plot_unsupervised_curves(predictions_df, summary_df, figure_dir):
     plt.close(fig)
 
 
-def plot_unsupervised_metrics(summary_df, figure_dir):
-    figure_dir.mkdir(parents=True, exist_ok=True)
-    metrics = [("f1_score", "F1-score"), ("recall", "Recall"), ("precision", "Precision"), ("pr_auc", "PR-AUC"), ("roc_auc", "ROC-AUC")]
-    labels = summary_df["model_label"].tolist()
-    x = np.arange(len(labels))
-    width = 0.16
-
-    fig, ax = plt.subplots(figsize=(11, 6))
-    for idx, (metric, label) in enumerate(metrics):
-        means = summary_df[f"{metric}_mean"].to_numpy() * 100
-        stds = summary_df[f"{metric}_std"].fillna(0).to_numpy() * 100
-        ax.bar(x + (idx - 2) * width, means, width, yerr=stds, capsize=4, label=label)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Score (%)")
-    ax.set_ylim(0, 105)
-    ax.set_title("Unsupervised Repeated-Seed Results")
-    ax.grid(axis="y", alpha=0.35)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=5, frameon=True)
-    fig.tight_layout()
-    fig.savefig(figure_dir / "unsupervised_repeated_seed_metrics.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-
 def regenerate_plots_from_existing(output_dir=OUTPUT_DIR, figure_dir=FIGURE_DIR):
     output_dir = Path(output_dir)
     figure_dir = Path(figure_dir)
@@ -435,7 +410,6 @@ def regenerate_plots_from_existing(output_dir=OUTPUT_DIR, figure_dir=FIGURE_DIR)
     predictions_df = pd.read_csv(predictions_path)
     summary_df = pd.read_csv(summary_path)
     plot_unsupervised_curves(predictions_df, summary_df, figure_dir)
-    plot_unsupervised_metrics(summary_df, figure_dir)
     print(f"[saved figures] {figure_dir}")
 
 
@@ -525,7 +499,6 @@ def main():
     paper_df.to_csv(output_dir / "unsupervised_repeated_seed_summary_paper_format.csv", index=False)
 
     plot_unsupervised_curves(predictions_df, summary_df, figure_dir)
-    plot_unsupervised_metrics(summary_df, figure_dir)
 
     print(f"[saved] {output_dir / 'unsupervised_repeated_seed_results.csv'}")
     print(f"[saved] {output_dir / 'unsupervised_repeated_seed_summary.csv'}")

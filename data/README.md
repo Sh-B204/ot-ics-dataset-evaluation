@@ -1,47 +1,33 @@
-# Data
+# Dataset preparation
 
-The raw ICS/OT dataset is **not included** in this repository. It comes from
-Kaggle and needs to be downloaded separately.
+The raw and processed OT/ICS datasets are not committed to this repository because the generated benchmark files are too large for a normal GitHub repository.
 
-## 1. Download the raw dataset
+## Raw data
 
-Source: `<KAGGLE_DATASET_URL>` (fill in the exact Kaggle dataset link — it
-could not be determined from the supplied project files).
+Place the raw dataset under:
 
-Unzip it so the flow-level CSVs end up at:
-
-```
+```text
 data/raw/ICS_Dataset/
-├── Normal_Data/...
-└── Attack_Data/...      (only files under paths containing "Network_Level"
-                           and "Flow" are used by the preprocessing script)
 ```
 
-This path is what `preprocessing/preprocess_ics_flow_dataset.py` expects by
-default (`data/raw/ICS_Dataset`).
+Keep the original dataset hierarchy intact so the preprocessing script can discover normal and attack flow files correctly.
 
-## 2. Run preprocessing
+## Build the processed benchmarks
+
+From the repository root:
 
 ```bash
-python preprocessing/preprocess_ics_flow_dataset.py
+python preprocessing/build_flow_benchmark.py
 ```
 
-This reads the raw flow CSVs and writes two processed benchmark variants to
-`data/processed/`:
+The script creates:
 
-```
+```text
 data/processed/
-├── with-time/    # full feature set, including time-derived columns
-└── no_time/      # time-ablated benchmark used for the ablation study
+├── full_features/
+└── time_ablated/
 ```
 
-Each variant contains the train/test splits and label maps used throughout
-`src/ics_ids/` (binary and multiclass detection tasks).
+The processed outputs include the binary and multiclass train/test CSVs, feature lists, label mapping, preprocessing metadata, diagnostics inputs, and the full labeled flow dataset required by the repeated-seed experiments.
 
-## Already have the processed data?
-
-If you already have `with-time/` and `no_time/` generated, just drop them
-into `data/processed/` in the layout shown above — no code changes needed.
-Both folders are gitignored under `data/raw/`; the processed folders are not
-git-ignored by default since they're derived data you may choose to publish
-alongside this repo, but they are not included in this ZIP.
+`data/raw/` and `data/processed/` are intentionally excluded from Git. The committed `results/` directory contains the final experiment outputs used by the evaluation code.

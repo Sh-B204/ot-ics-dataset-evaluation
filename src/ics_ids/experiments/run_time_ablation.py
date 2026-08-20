@@ -3,7 +3,6 @@ import ast
 import json
 import time
 from pathlib import Path
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -13,20 +12,28 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import average_precision_score, precision_recall_curve
+from sklearn.metrics import average_precision_score
 from sklearn.utils.class_weight import compute_sample_weight
-
+from matplotlib.ticker import FuncFormatter
 try:
     from xgboost import XGBClassifier
 except ImportError:
     XGBClassifier = None
-
 from .. import config
 from .. import utils
 
 DEFAULT_SEEDS = [42, 7, 21, 100, 2026]
 MODEL_DISPLAY = {"random_forest": "Random Forest", "xgboost": "XGBoost", "mlp": "MLP"}
 TASK_DISPLAY = {"binary": "Binary", "multiclass": "Multiclass"}
+
+
+MODEL_ORDER = ["mlp", "random_forest", "xgboost"]
+MODEL_COLORS = {
+    "mlp": "#1f77b4",            
+    "random_forest": "#ff7f0e",  
+    "xgboost": "#2ca02c",        
+}
+
 BENCHMARKS = [
     ("full_features", "Full-feature", config.FULL_FEATURE_DATA_DIR, 49),
     ("time_ablated", "Time-ablated", config.TIME_ABLATED_DATA_DIR, 41),
@@ -325,37 +332,6 @@ def add_drop_columns(summary):
     return out
 
 
-def make_paper_table(summary, out_path):
-    rows = []
-    order = {"full_features": 0, "time_ablated": 1, "mlp": 0, "random_forest": 1, "xgboost": 2, "binary": 0, "multiclass": 1}
-    summary = summary.copy()
-    summary["sort_key"] = summary.apply(lambda r: (order.get(r["task"], 9), order.get(r["model"], 9), order.get(r["benchmark"], 9)), axis=1)
-    summary = summary.sort_values("sort_key")
-
-    for _, r in summary.iterrows():
-        if r["task"] == "binary":
-            selected = ["accuracy", "precision", "recall", "f1_score", "balanced_accuracy", "pr_auc", "false_positive_rate"]
-        else:
-            selected = ["accuracy", "macro_precision", "macro_recall", "macro_f1", "weighted_f1", "micro_roc_auc"]
-        row = {
-            "Benchmark": r["benchmark_display"],
-            "Model": r["model_display"],
-            "Task": r["task_display"],
-            "Features": int(r["n_features"]),
-            "Runs": int(r["n_runs"]),
-        }
-        for metric in selected:
-            mean_col = f"{metric}_mean"
-            std_col = f"{metric}_std"
-            if mean_col in r and pd.notna(r[mean_col]):
-                row[METRIC_LABELS.get(metric, metric)] = f"{r[mean_col] * 100:.2f} ± {r[std_col] * 100:.2f}%"
-        rows.append(row)
-    paper = pd.DataFrame(rows)
-    paper.to_csv(out_path, index=False)
-    return paper
-
-
-
 def save_binary_prediction_scores(pred_dir, benchmark_key, model_key, seed, y_true, y_pred, y_score):
     pred_dir = Path(pred_dir)
     pred_dir.mkdir(parents=True, exist_ok=True)
@@ -371,189 +347,109 @@ def save_binary_prediction_scores(pred_dir, benchmark_key, model_key, seed, y_tr
     df.to_csv(out_path, index=False)
 
 
-def _mean_pr_curve_from_files(files):
-    recall_grid = np.linspace(0.0, 1.0, 300)
-    precision_rows = []
-    ap_scores = []
-    for file_path in files:
-        df = pd.read_csv(file_path)
-        if "y_score" not in df.columns or df["y_score"].isna().all():
-            continue
-        y_true = df["y_true"].astype(int).to_numpy()
-        y_score = df["y_score"].astype(float).to_numpy()
-        precision, recall, _ = precision_recall_curve(y_true, y_score)
-        ap_scores.append(average_precision_score(y_true, y_score))
+def plot_time_ablation_performance_drop(summary_path, fig_dir):
+    """
+    Paper-ready comparison of full-feature and time-ablated performance.
 
-        recall_asc = recall[::-1]
-        precision_asc = precision[::-1]
-        precision_interp = np.interp(recall_grid, recall_asc, precision_asc)
-        precision_rows.append(precision_interp)
+    Left: Binary F1-score change.
+    Right: Multiclass Macro F1-score change.
 
-    if not precision_rows:
-        return None
+    Bars extend downward when performance decreases. Each bar is labeled
+    directly at the zero line with the percentage change after removing
+    time-derived features.
 
-    precision_arr = np.vstack(precision_rows)
-    return {
-        "recall_grid": recall_grid,
-        "precision_mean": precision_arr.mean(axis=0),
-        "precision_std": precision_arr.std(axis=0, ddof=1) if precision_arr.shape[0] > 1 else np.zeros_like(recall_grid),
-        "ap_mean": float(np.mean(ap_scores)),
-        "ap_std": float(np.std(ap_scores, ddof=1)) if len(ap_scores) > 1 else 0.0,
-        "n_curves": len(ap_scores),
+    Same implementation/style as the former
+    paper_figures.plot_time_ablation_performance_drop(), with the benchmark
+    lookup updated to the current "full_features" key (was "full_feature").
+    """
+    summary_path = Path(summary_path)
+    fig_dir = Path(fig_dir)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    if not summary_path.exists():
+        print(f"[skip] time-ablation summary not found: {summary_path}")
+        return
+
+    df = pd.read_csv(summary_path)
+
+    required_cols = {"benchmark", "model", "task", "f1_score_mean", "macro_f1_mean"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in {summary_path.name}: {sorted(missing)}")
+
+    task_settings = {
+        "binary": {"title": "Binary Attack Detection", "metric": "f1_score_mean", "ylabel": "F1-score change (%)"},
+        "multiclass": {"title": "Multiclass Attack Classification", "metric": "macro_f1_mean", "ylabel": "Macro F1-score change (%)"},
     }
 
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 5.8), sharey=False)
 
-def plot_binary_pr_curves(pred_dir, benchmark_key, benchmark_label, save_path):
-    pred_dir = Path(pred_dir)
-    fig, ax = plt.subplots(figsize=(7, 5))
+    for ax, task in zip(axes, ["binary", "multiclass"]):
+        setting = task_settings[task]
+        metric = setting["metric"]
 
-    any_curve = False
-    for model_key in ["mlp", "random_forest", "xgboost"]:
-        files = sorted(pred_dir.glob(f"{benchmark_key}_{model_key}_binary_seed*_predictions.csv"))
-        curve = _mean_pr_curve_from_files(files)
-        if curve is None:
-            continue
+        labels = []
+        changes = []
+        colors = []
 
-        label = f"{MODEL_DISPLAY[model_key]} (PR-AUC={curve['ap_mean']:.3f}±{curve['ap_std']:.3f})"
-        ax.plot(curve["recall_grid"], curve["precision_mean"], linewidth=2, label=label)
-        ax.fill_between(
-            curve["recall_grid"],
-            np.maximum(0, curve["precision_mean"] - curve["precision_std"]),
-            np.minimum(1, curve["precision_mean"] + curve["precision_std"]),
-            alpha=0.12,
-        )
-        any_curve = True
+        for model_key in MODEL_ORDER:
+            model_df = df[(df["model"] == model_key) & (df["task"] == task)].copy()
 
-    if not any_curve:
-        plt.close(fig)
-        print(f"[skip] no prediction score files found for PR curves: {benchmark_key}")
-        return
+            full_row = model_df[model_df["benchmark"] == "full_features"]
+            ablated_row = model_df[model_df["benchmark"] == "time_ablated"]
 
-    ax.set_title(f"Tuned Binary PR Curves: {benchmark_label} Benchmark")
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1.05)
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), frameon=True)
-    fig.tight_layout()
-    save_path.parent.mkdir(parents=True, exist_ok=True)
+            if full_row.empty or ablated_row.empty:
+                print(f"[skip] missing ablation rows for {model_key} / {task}")
+                continue
+
+            full_val = full_row.iloc[0].get(metric, np.nan)
+            ablated_val = ablated_row.iloc[0].get(metric, np.nan)
+
+            if pd.isna(full_val) or pd.isna(ablated_val):
+                print(f"[skip] missing {metric} for {model_key} / {task}")
+                continue
+
+            full_score = float(full_val) * 100
+            ablated_score = float(ablated_val) * 100
+            change = ablated_score - full_score
+
+            labels.append(MODEL_DISPLAY[model_key])
+            changes.append(change)
+            colors.append(MODEL_COLORS[model_key])
+
+        x = np.arange(len(labels))
+        bars = ax.bar(x, changes, width=0.58, color=colors)
+
+        ax.axhline(0, color="gray", linewidth=1.2)
+
+        for i, bar in enumerate(bars):
+            change = changes[i]
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, 0.75, f"{change:.1f}%",
+                ha="center", va="bottom", fontsize=10, fontweight="bold",
+            )
+
+        ax.set_title(setting["title"], fontsize=12)
+        ax.set_ylabel(setting["ylabel"])
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+        ax.grid(axis="y", alpha=0.30)
+
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, pos: f"{value:.0f}%"))
+
+        if changes:
+            lowest = min(changes)
+            ax.set_ylim(min(lowest - 4.0, -8.0), 5.0)
+            ticks = ax.get_yticks()
+            ax.set_yticks([t for t in ticks if t not in (5, 10)])
+
+    fig.suptitle("Performance Change After Removing Time-Derived Features", fontsize=14, y=0.98)
+    fig.subplots_adjust(top=0.84, bottom=0.14, wspace=0.28)
+
+    save_path = fig_dir / "time_ablation_performance_drop.png"
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-
-
-def plot_ablation_metric(summary, task, metrics, title, save_path):
-    df = summary[summary["task"] == task].copy()
-    if df.empty:
-        return
-
-    model_order = ["mlp", "random_forest", "xgboost"]
-    benchmark_order = ["full_features", "time_ablated"]
-    labels = []
-    centers = []
-    x = []
-    pos = 0
-    for m in model_order:
-        for b in benchmark_order:
-            labels.append(f"{MODEL_DISPLAY[m]}\n{df[df['benchmark']==b]['benchmark_display'].iloc[0] if not df[df['benchmark']==b].empty else b}")
-            x.append(pos)
-            pos += 1
-        pos += 0.6
-    x = np.array(x)
-    width = 0.8 / len(metrics)
-
-    fig, ax = plt.subplots(figsize=(11, 5))
-    for i, metric in enumerate(metrics):
-        means, stds = [], []
-        for label_idx, m in enumerate(model_order):
-            for b in benchmark_order:
-                row = df[(df["model"] == m) & (df["benchmark"] == b)]
-                if row.empty:
-                    means.append(np.nan); stds.append(np.nan)
-                else:
-                    means.append(row.iloc[0].get(f"{metric}_mean", np.nan) * 100)
-                    stds.append(row.iloc[0].get(f"{metric}_std", np.nan) * 100)
-        ax.bar(x + (i - (len(metrics) - 1) / 2) * width, means, width, yerr=stds, capsize=4, label=METRIC_LABELS.get(metric, metric))
-
-    ax.set_title(title)
-    ax.set_ylabel("Score (%)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=9)
-    ax.set_ylim(0, 105)
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=len(metrics), frameon=True)
-    fig.tight_layout()
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_drop_summary(summary, save_path):
-    rows = []
-    for _, r in summary[summary["benchmark"] == "time_ablated"].iterrows():
-        if r["task"] == "binary":
-            metric = "f1_score_drop_full_to_ablated_mean"
-            label = "Binary F1 drop"
-        else:
-            metric = "macro_f1_drop_full_to_ablated_mean"
-            label = "Multiclass macro F1 drop"
-        if metric in r and pd.notna(r[metric]):
-            rows.append({"model": r["model_display"], "task_metric": label, "drop": r[metric] * 100})
-    if not rows:
-        return
-    df = pd.DataFrame(rows)
-    pivot = df.pivot(index="model", columns="task_metric", values="drop").reset_index()
-    labels = pivot["model"].tolist()
-    metrics = [c for c in pivot.columns if c != "model"]
-    x = np.arange(len(labels))
-    width = 0.8 / len(metrics)
-
-    fig, ax = plt.subplots(figsize=(9, 5))
-    for i, metric in enumerate(metrics):
-        ax.bar(x + (i - (len(metrics) - 1) / 2) * width, pivot[metric], width, label=metric)
-    ax.set_title("Performance Change After Removing Time-Derived Features")
-    ax.set_ylabel("Score drop (percentage points)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=len(metrics), frameon=True)
-    fig.tight_layout()
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-
-def make_plots(summary, fig_dir, pred_dir=None):
-    fig_dir.mkdir(parents=True, exist_ok=True)
-    plot_ablation_metric(
-        summary, "binary", ["f1_score", "recall", "precision"],
-        "Tuned Binary Detection Results",
-        fig_dir / "tuned_ablation_binary_f1_recall_precision.png"
-    )
-    if pred_dir is not None:
-        plot_binary_pr_curves(pred_dir, "time_ablated", "Time-ablated", fig_dir / "tuned_time_ablated_binary_pr_curves.png")
-        plot_binary_pr_curves(pred_dir, "full_features", "Full-feature", fig_dir / "tuned_full_features_binary_pr_curves.png")
-
-    binary_auc_metrics = ["balanced_accuracy", "false_positive_rate"]
-    binary_auc_title = "Tuned Binary Imbalance-Aware Metrics"
-    binary_auc_path = fig_dir / "tuned_ablation_binary_balanced_accuracy_fpr.png"
-    if "pr_auc_mean" in summary.columns and summary["pr_auc_mean"].notna().any():
-        binary_auc_metrics = ["pr_auc", "balanced_accuracy", "false_positive_rate"]
-        binary_auc_title = "Tuned Binary PR-AUC, Balanced Accuracy, and FPR"
-        binary_auc_path = fig_dir / "tuned_ablation_binary_pr_auc_balanced_accuracy_fpr.png"
-    plot_ablation_metric(summary, "binary", binary_auc_metrics, binary_auc_title, binary_auc_path)
-
-    plot_ablation_metric(
-        summary, "multiclass", ["macro_f1", "macro_recall", "macro_precision"],
-        "Tuned Multiclass Macro Metrics",
-        fig_dir / "tuned_ablation_multiclass_macro_metrics.png"
-    )
-    plot_ablation_metric(
-        summary, "multiclass", ["weighted_f1", "micro_roc_auc"],
-        "Tuned Multiclass Aggregate Metrics",
-        fig_dir / "tuned_ablation_multiclass_weighted_micro.png"
-    )
-    plot_drop_summary(summary, fig_dir / "tuned_ablation_score_difference.png")
+    print(f"[saved] {save_path}")
 
 
 def regenerate_plots_from_existing(out_dir, fig_dir):
@@ -566,16 +462,11 @@ def regenerate_plots_from_existing(out_dir, fig_dir):
         results.to_csv(results_path, index=False)
         summary = add_drop_columns(summarize_results(results))
         summary.to_csv(summary_path, index=False)
-        make_paper_table(summary, out_dir / "time_ablation_tuned_repeated_summary_paper_format.csv")
         print("[updated] derived balanced-accuracy columns and summary files")
-    elif summary_path.exists():
-        summary = pd.read_csv(summary_path)
-    else:
+    elif not summary_path.exists():
         raise FileNotFoundError("Missing time_ablation_tuned_repeated_results.csv. Run the study once before --plot-only.")
 
-    make_plots(summary, fig_dir, out_dir / "predictions")
-    if "pr_auc_mean" not in summary.columns or summary["pr_auc_mean"].isna().all():
-        print("[note] PR-AUC was not in the existing CSV, so PR-AUC figures cannot be generated without rerunning the models with score saving enabled.")
+    plot_time_ablation_performance_drop(summary_path, fig_dir)
     print(f"[saved figures] {fig_dir.resolve()}")
 
 
@@ -633,11 +524,7 @@ def main():
     summary.to_csv(summary_path, index=False)
     print(f"[saved] {summary_path}")
 
-    paper_path = out_dir / "time_ablation_tuned_repeated_summary_paper_format.csv"
-    make_paper_table(summary, paper_path)
-    print(f"[saved] {paper_path}")
-
-    make_plots(summary, fig_dir, out_dir / "predictions")
+    plot_time_ablation_performance_drop(summary_path, fig_dir)
     print(f"[saved figures] {fig_dir.resolve()}")
     print("Done.")
 

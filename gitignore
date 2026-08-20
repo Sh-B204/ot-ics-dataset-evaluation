@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Datasets
+data/raw/
+data/processed/
+
+# Trained model artifacts
+results/models/
+
+# Local / temporary files
+*.log
+*.tmp
+.ipynb_checkpoints/

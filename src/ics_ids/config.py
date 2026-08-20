@@ -10,10 +10,15 @@ TIME_ABLATED_DATA_DIR = DATA_ROOT_DIR / "time_ablated"
 DATA_DIR = TIME_ABLATED_DATA_DIR
 RESULTS_DIR = REPO_ROOT / "results"
 MODELS_DIR = RESULTS_DIR / "models"
-METRICS_DIR = RESULTS_DIR / "metrics"
 FIGURES_DIR = RESULTS_DIR / "figures"
-PREDICTIONS_DIR = RESULTS_DIR / "predictions"
 
+METRICS_DIR = RESULTS_DIR / "metrics"
+PREDICTIONS_DIR = RESULTS_DIR / "predictions"
+ABLATION_DIR = RESULTS_DIR / "time_ablation"
+
+HYPERPARAM_DIR = RESULTS_DIR / "hyperparameter_study"
+ROBUSTNESS_DIR = RESULTS_DIR / "robustness"
+DIAGNOSTICS_DIR = RESULTS_DIR / "dataset_diagnostics"
 
 TIME_LEAKAGE_COLS = [
     "startOffset",
@@ -30,14 +35,9 @@ TIME_LEAKAGE_COLS = [
     "time_seconds_of_day",
 ]
 
-ABLATION_DIR = RESULTS_DIR / "time_ablation"
-HYPERPARAM_DIR = RESULTS_DIR / "hyperparameter_study"
-ROBUSTNESS_DIR = RESULTS_DIR / "robustness"
-DIAGNOSTICS_DIR = RESULTS_DIR / "dataset_diagnostics"
-
 SEEDS = [42, 7, 21, 100, 2026]
 
-for d in [MODELS_DIR, METRICS_DIR, FIGURES_DIR, PREDICTIONS_DIR, ABLATION_DIR, HYPERPARAM_DIR, ROBUSTNESS_DIR, DIAGNOSTICS_DIR]:
+for d in [MODELS_DIR, FIGURES_DIR, HYPERPARAM_DIR, ROBUSTNESS_DIR, DIAGNOSTICS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 BINARY_TRAIN_CSV = DATA_DIR / "binary_detection_train.csv"
