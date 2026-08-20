@@ -1,6 +1,6 @@
 # Dataset preparation
 
-The raw and processed OT/ICS datasets are not committed to this repository because the generated benchmark files are too large for a normal GitHub repository.
+The raw and processed OT/ICS datasets are not committed to this repository.
 
 ## Raw data
 
